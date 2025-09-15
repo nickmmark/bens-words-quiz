@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vocab Quiz</title>
+<style>
+  :root { --fg:#111; --bg:#fafafa; --muted:#777; --accent:#2a73ff; --ok:#17a34a; --bad:#d33; --card:#fff; --border:#e6e6e6; }
+  html,body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg)}
+  .wrap{max-width:900px;margin:32px auto;padding:0 16px}
+  header{display:flex;flex-wrap:wrap;align-items:center;gap:12px;justify-content:space-between;margin-bottom:16px}
+  h1{font-size:20px;margin:0}
+  .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .pill{border:1px solid var(--border);background:var(--card);border-radius:999px;padding:6px 12px;font-size:14px}
+  .pill.badge{border-color:#c7d2fe;background:#eef2ff}
+  .switch{display:inline-flex;align-items:center;gap:8px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 1px 0 rgba(0,0,0,.04);padding:20px}
+  .q{font-size:20px;line-height:1.35;margin:0 0 14px}
+  .meta{color:var(--muted);font-size:14px;margin-bottom:12px}
+  .choices{display:grid;gap:10px}
+  button.choice{all:unset;display:block;border:1px solid var(--border);background:var(--card);padding:12px 14px;border-radius:10px;cursor:pointer}
+  button.choice:hover{border-color:#cfd7ff;background:#f6f8ff}
+  button.choice.correct{border-color:var(--ok);background:#f0fbf4}
+  button.choice.wrong{border-color:var(--bad);background:#fff5f5}
+  .foot{display:flex;justify-content:space-between;align-items:center;margin-top:14px;gap:12px;flex-wrap:wrap}
+  .feedback{font-size:18px;font-weight:700}
+  .hide{display:none}
+  .btn{all:unset;cursor:pointer;border:1px solid var(--border);background:var(--card);padding:8px 12px;border-radius:10px}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .progress{height:8px;background:#eee;border-radius:999px;overflow:hidden}
+  .bar{height:100%;background:var(--accent);width:0%}
+  details summary{cursor:pointer}
+  textarea{width:100%;min-height:120px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .small{font-size:12px;color:var(--muted)}
+  /* Review dialog */
+  dialog{border:none;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.15);padding:0;max-width:720px;width:min(92vw,720px)}
+  .dlg-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid var(--border);background:var(--card)}
+  .dlg-body{padding:10px 16px 16px;background:var(--card);max-height:min(70vh,580px);overflow:auto}
+  .list{display:flex;flex-direction:column;gap:10px}
+  .row{border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:#fff}
+  .row h4{margin:0 0 6px;font-size:15px}
+  .row p{margin:0;font-size:14px}
+  .row .mine{color:var(--bad)}
+  .row .correct{color:var(--ok)}
+  .row button.jump{margin-top:8px}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Vocab Quiz</h1>
+      <div class="controls">
+        <span class="pill" id="scorePill">Score: 0/0 0%</span>
+        <span class="pill">Question <strong id="qnum">0</strong>/<span id="qcount">0</span></span>
+        <span class="pill badge hide" id="modeBadge">Wrong-only mode</span>
+        <label class="pill switch">
+          <input type="checkbox" id="modeToggle" />
+          <span>Definition → Term</span>
+        </label>
+        <button class="btn" id="wrongBtn" title="Review the ones you missed" disabled>Wrong (0)</button>
+        <button class="btn" id="retakeWrongBtn" title="Mini-quiz of just your wrong answers" disabled>Retake Wrong Only</button>
+        <button class="btn" id="shuffleBtn" title="New order">Shuffle</button>
+        <button class="btn" id="restartBtn">Restart</button>
+      </div>
+    </header>
+
+    <div class="progress" aria-hidden="true"><div class="bar" id="bar"></div></div>
+    <div class="card" id="card">
+      <div class="meta" id="meta"></div>
+      <p class="q" id="question">Loading…</p>
+      <div class="choices" id="choices"></div>
+      <div class="foot">
+        <div class="left">
+          <div id="feedback" class="feedback hide"></div>
+        </div>
+        <div class="right">
+          <button class="btn" id="prevBtn">Prev</button>
+          <button class="btn primary" id="nextBtn">Next</button>
+        </div>
+      </div>
+    </div>
+
+    <details style="margin-top:18px">
+      <summary>✏️ Edit / paste your own list (format: <em>Term - definition</em>)</summary>
+      <p class="small">Paste below, one per line, like: <code>Acme – the highest point</code>. Then click “Load list”.</p>
+      <textarea id="editor"></textarea>
+      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" id="loadBtn">Load list</button>
+        <button class="btn" id="downloadBtn">Download current as JSON</button>
+      </div>
+    </details>
+  </div>
+
+  <!-- Review wrong answers dialog -->
+  <dialog id="wrongDlg">
+    <div class="dlg-head">
+      <strong>Review: Wrong Answers</strong>
+      <button class="btn" id="closeWrong">Close</button>
+    </div>
+    <div class="dlg-body">
+      <div id="wrongList" class="list"></div>
+    </div>
+  </dialog>
+
+<script>
+/* ====== DATA (you can paste your own in the editor) ====== */
+const RAW = `
+Acme – the highest point; peak; zenith.
+Alacrity – cheerful readiness or eagerness.
+Ambiguous – unclear, open to multiple meanings.
+Anachronism – something out of its proper historical time.
+Aesthetic – concerned with beauty or artistic taste.
+Articulate – able to express clearly and effectively.
+Assail – to attack vigorously, physically or verbally.
+Capricious – impulsive, unpredictable, subject to whim.
+Candid – truthful, straightforward, frank.
+Castigate – to criticize or punish harshly.
+Connoisseur – an expert judge in matters of taste.
+Condone – to overlook, accept, or forgive wrongdoing.
+Contrite – remorseful, feeling guilt or regret.
+Convoluted – extremely complex or difficult to follow.
+Crescendo – a gradual increase in intensity, volume, or force.
+Deference – respectful submission or yielding to another.
+Deface – to mar the appearance of; to vandalize.
+Discern – to perceive or recognize clearly.
+Eclectic – drawn from a wide variety of sources.
+Eloquent – fluent and persuasive in speech or writing.
+Emulate – to imitate with the intent to equal or surpass.
+Enigma – something puzzling or mysterious.
+Ephemeral – lasting a very short time; fleeting.
+Erratic – unpredictable, inconsistent, irregular.
+Eschew – to deliberately avoid or shun.
+Esoteric – intended for or understood by only a small group.
+Fortuitous – happening by chance; often fortunate.
+Frugality – thriftiness; careful use of money or resources.
+Furtive – secretive, sneaky, done to avoid notice.
+Guile – sly or cunning intelligence.
+Impassé – a deadlock; a situation with no escape.
+Impervious – not allowing passage; unaffected by.
+Imperturbable – unable to be upset or excited; calm.
+Implacable – relentless, unable to be appeased.
+Impetuous – acting quickly without thought; rash.
+Ingrate – an ungrateful person.
+Innocuous – harmless, inoffensive.
+Intrepid – fearless, adventurous, bold.
+Kindle – to start a fire; to inspire or ignite (emotion/idea).
+Keen – sharp, perceptive; eager.
+Larceny – theft of personal property.
+Levity – lack of seriousness, often in a humorous way.
+Lethargic – sluggish, lacking energy.
+Loquacious – very talkative, chatty.
+Luminous – emitting light; bright or radiant.
+Malleable – easily shaped or influenced.
+Meticulous – extremely careful and precise.
+Mirth – amusement, joy, often with laughter.
+Monotony – tedious sameness; lack of variety.
+Nadir – the lowest point; rock bottom.
+Nuance – a subtle distinction or variation.
+Onerous – burdensome, difficult, oppressive.
+Opine – to state an opinion.
+Paradox – a seemingly self-contradictory statement that may hold truth.
+Parry – to ward off (a blow, criticism, or attack).
+Perfidious – deceitful, treacherous, untrustworthy.
+Perfunctory – done with minimal effort; superficial.
+Placate – to soothe or appease someone’s anger.
+Pragmatic – practical, focused on real-world solutions.
+Proliferate – to multiply or spread rapidly.
+Rococo – extravagantly ornate, highly decorated.
+Rustic – simple, rural, unsophisticated.
+Sagacious – wise, shrewd, showing good judgment.
+Salubrious – health-giving, wholesome.
+Symbiosis – a mutually beneficial relationship.
+Vacillate – to waver between options; be indecisive.
+Verbose – using more words than necessary; wordy.
+Verdant – green with vegetation; lush.
+Whimsical – playfully fanciful or unpredictable.
+Wily – crafty, clever at gaining advantage.
+`.trim();
+
+/* ====== Parser: accept -, – , — between term and definition ====== */
+function parseList(str){
+  return str.split(/\r?\n/).map(rawLine=>{
+    const line = rawLine.trim();
+    if(!line) return null;
+    const m = line.split(/\s*[-–—]\s*/); // hyphen, en dash, em dash
+    if(m.length < 2) return null;
+    const term = m.shift().trim();
+    const def = m.join(' - ').trim();
+    return term && def ? {term, def} : null;
+  }).filter(Boolean);
+}
+
+let DATA = parseList(RAW);
+
+/* ====== UI refs ====== */
+const qEl = document.getElementById('question');
+const metaEl = document.getElementById('meta');
+const choicesEl = document.getElementById('choices');
+const feedbackEl = document.getElementById('feedback');
+const qnumEl = document.getElementById('qnum');
+const qcountEl = document.getElementById('qcount');
+const barEl = document.getElementById('bar');
+const scorePill = document.getElementById('scorePill');
+const modeBadge = document.getElementById('modeBadge');
+
+const prevBtn = document.getElementById('prevBtn');
+const nextBtn = document.getElementById('nextBtn');
+const restartBtn = document.getElementById('restartBtn');
+const shuffleBtn = document.getElementById('shuffleBtn');
+const modeToggle = document.getElementById('modeToggle');
+
+const editor = document.getElementById('editor');
+const loadBtn = document.getElementById('loadBtn');
+const downloadBtn = document.getElementById('downloadBtn');
+
+const wrongBtn = document.getElementById('wrongBtn');
+const retakeWrongBtn = document.getElementById('retakeWrongBtn');
+const wrongDlg = document.getElementById('wrongDlg');
+const wrongList = document.getElementById('wrongList');
+const closeWrong = document.getElementById('closeWrong');
+
+/* ====== State ====== */
+let order = [];          // indices into DATA for current deck
+let idx = 0;             // current position in 'order'
+let score = 0;           // number correct
+let answered = new Map();// index -> {correct:boolean, pick:string}
+let forwardMode = true;  // true: term->def, false: def->term
+let wrongOnly = false;   // whether we're in the wrong-only mini-quiz
+
+/* ====== Utils ====== */
+function shuffle(a){
+  for(let i=a.length-1;i>0;i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [a[i],a[j]]=[a[j],a[i]];
+  }
+  return a;
+}
+function makeFullOrder(){ order = shuffle([...DATA.keys()]); }
+function answeredCount(){ return answered.size; }
+function wrongIndices(){
+  return [...answered.entries()].filter(([i,res]) => !res.correct).map(([i]) => i);
+}
+function percent(){
+  const a = answeredCount();
+  return a === 0 ? 0 : Math.floor((score / a) * 100);
+}
+function updateHeader(){
+  const a = answeredCount();
+  scorePill.textContent = `Score: ${score}/${a} ${percent()}%`;
+  qcountEl.textContent = order.length;
+  qnumEl.textContent = Math.min(idx+1, order.length);
+  barEl.style.width = `${Math.round((idx)/Math.max(1,order.length)*100)}%`;
+
+  const w = wrongIndices().length;
+  wrongBtn.textContent = `Wrong (${w})`;
+  wrongBtn.disabled = w === 0;
+  retakeWrongBtn.disabled = w === 0;
+
+  modeBadge.classList.toggle('hide', !wrongOnly);
+}
+function buildChoices(i){
+  const correct = DATA[i];
+  const pool = DATA.map(x => forwardMode ? x.def : x.term);
+  const correctText = forwardMode ? correct.def : correct.term;
+  const wrongs = [];
+  const used = new Set([correctText]);
+  while(wrongs.length < 4){
+    const pick = pool[Math.floor(Math.random()*pool.length)];
+    if(!used.has(pick)){ wrongs.push(pick); used.add(pick); }
+  }
+  const options = shuffle([correctText, ...wrongs]);
+  return {options, correctText};
+}
+
+/* ====== Rendering ====== */
+function render(){
+  if(order.length===0){ qEl.textContent = 'No items loaded.'; return; }
+  updateHeader();
+  const i = order[idx];
+  const item = DATA[i];
+  const prompt = forwardMode ? item.term : item.def;
+  const {options, correctText} = buildChoices(i);
+
+  metaEl.textContent = forwardMode ? 'Pick the correct definition.' : 'Pick the correct term.';
+  qEl.textContent = prompt;
+
+  choicesEl.innerHTML = '';
+  options.forEach(opt=>{
+    const btn = document.createElement('button');
+    btn.className = 'choice';
+    btn.textContent = opt;
+    btn.onclick = ()=>handlePick(opt, correctText);
+    const was = answered.get(i);
+    if(was){
+      btn.disabled = true;
+      if(opt===correctText) btn.classList.add('correct');
+      if(was.pick===opt && !was.correct) btn.classList.add('wrong');
+    }
+    choicesEl.appendChild(btn);
+  });
+
+  const was = answered.get(i);
+  if(was){
+    feedbackEl.textContent = was.correct ? '✅ Correct!' : '❌ Incorrect. Correct answer shown in green.';
+    feedbackEl.classList.remove('hide');
+  } else {
+    feedbackEl.textContent = '';
+    feedbackEl.classList.add('hide');
+  }
+
+  prevBtn.disabled = (idx===0);
+  nextBtn.textContent = (idx===order.length-1) ? 'Finish' : 'Next';
+}
+
+/* ====== Handlers ====== */
+function handlePick(pick, correctText){
+  const i = order[idx];
+  if(answered.has(i)) return;
+  const isCorrect = pick === correctText;
+  answered.set(i, {correct:isCorrect, pick});
+  if(isCorrect) score++;
+
+  document.querySelectorAll('button.choice').forEach(b=>{
+    b.disabled = true;
+    if(b.textContent===correctText) b.classList.add('correct');
+    if(b.textContent===pick && !isCorrect) b.classList.add('wrong');
+  });
+
+  feedbackEl.textContent = isCorrect ? '✅ Correct!' : '❌ Incorrect. Correct answer shown in green.';
+  feedbackEl.classList.remove('hide');
+  updateHeader();
+}
+
+prevBtn.onclick = ()=>{ if(idx>0){ idx--; render(); } };
+nextBtn.onclick = ()=>{
+  if(idx < order.length-1){
+    idx++; render();
+  } else {
+    qEl.textContent = `Done! Score: ${score}/${answeredCount()} ${percent()}%.`;
+    metaEl.textContent = wrongOnly ? 'Wrong-only mini-quiz complete.' : 'Quiz complete.';
+    choicesEl.innerHTML = '';
+    feedbackEl.textContent = '';
+    feedbackEl.classList.add('hide');
+    prevBtn.disabled = false;
+    nextBtn.disabled = true;
+    updateHeader();
+  }
+};
+
+function resetStateForNewDeck(){
+  idx = 0;
+  score = 0;
+  answered.clear();
+}
+function startFullDeck(){
+  wrongOnly = false;
+  makeFullOrder();
+  resetStateForNewDeck();
+  render();
+}
+function startWrongOnly(){
+  const wrongs = wrongIndices();
+  if(wrongs.length === 0) return;
+  wrongOnly = true;
+  order = shuffle([...wrongs]);
+  resetStateForNewDeck();
+  render();
+}
+
+restartBtn.onclick = startFullDeck;
+shuffleBtn.onclick = startFullDeck;
+retakeWrongBtn.onclick = startWrongOnly;
+
+modeToggle.onchange = ()=>{
+  forwardMode = !forwardMode;
+  // keep current deck (full or wrong-only) but reset progress
+  resetStateForNewDeck();
+  render();
+};
+
+/* ====== Wrong review dialog ====== */
+wrongBtn.onclick = ()=>{
+  buildWrongList();
+  if(typeof wrongDlg.showModal === 'function'){ wrongDlg.showModal(); }
+  else { wrongDlg.setAttribute('open','open'); }
+};
+closeWrong.onclick = ()=> wrongDlg.close();
+function buildWrongList(){
+  wrongList.innerHTML = '';
+  const wrongs = wrongIndices();
+  if(wrongs.length === 0){
+    wrongList.innerHTML = '<p class="small">Nothing to review—nice!</p>';
+    return;
+  }
+  wrongs.forEach(i=>{
+    const item = DATA[i];
+    const res = answered.get(i);
+    const correctText = forwardMode ? item.def : item.term;
+    const prompt = forwardMode ? item.term : item.def;
+    const li = document.createElement('div');
+    li.className = 'row';
+    li.innerHTML = `
+      <h4>${prompt}</h4>
+      <p class="mine">Your answer: ${res.pick}</p>
+      <p class="correct">Correct: ${correctText}</p>
+    `;
+    const jump = document.createElement('button');
+    jump.className = 'btn jump';
+    jump.textContent = 'Jump to this question';
+    jump.onclick = ()=>{
+      const pos = order.indexOf(i);
+      if(pos !== -1){ idx = pos; render(); wrongDlg.close(); }
+      else {
+        // If the item isn't in the current deck, switch to full deck and jump
+        wrongDlg.close();
+        wrongOnly = false;
+        makeFullOrder();
+        idx = order.indexOf(i);
+        if(idx === -1){ order.unshift(i); idx = 0; }
+        resetStateForNewDeck();
+        render();
+      }
+    };
+    li.appendChild(jump);
+    wrongList.appendChild(li);
+  });
+}
+
+/* ====== Editor / import-export ====== */
+editor.value = RAW;
+loadBtn.onclick = ()=>{
+  const parsed = parseList(editor.value);
+  if(parsed.length===0){ alert('Could not parse any “Term - definition” lines.'); return; }
+  DATA = parsed;
+  startFullDeck();
+};
+downloadBtn.onclick = ()=>{
+  const blob = new Blob([JSON.stringify(DATA,null,2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'vocab.json';
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+/* ====== Init ====== */
+startFullDeck();
+</script>
+</body>
+</html>
